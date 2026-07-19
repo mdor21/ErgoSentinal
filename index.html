@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ErgoSentinel — Workplace Ergonomic Monitoring</title>
+
+<!-- ============================================================================
+     CONTENT-SECURITY-POLICY (v0.4.8, Fix-1) — ENFORCED ZERO-EGRESS
+     ============================================================================
+     This policy is the mechanism behind the privacy claim. Without it, "no video
+     leaves the device" is a property of the SOURCE CODE (verifiable by reading it).
+     With it, the USER AGENT refuses any outbound connection to a host not listed
+     below — so even a compromised third-party script cannot exfiltrate frames.
+     That is the difference between "we do not transmit" and "the browser will not
+     permit transmission".
+
+     TWO-TIER POLICY (read before editing):
+
+     NOTE (v0.4.8): 'frame-ancestors' was REMOVED from this policy. It is a
+     header-only directive and is IGNORED when delivered via a <meta> element,
+     which produced a console error. To enforce it, serve the policy as an HTTP
+     response header instead. Its absence does not weaken connect-src, which is
+     the directive carrying the zero-egress guarantee.
+
+     TIER 1 — NETWORKED MODE (active below).
+       MoveNet fetches its ~3 MB weights at runtime, so connect-src MUST include
+       every host in the model's REDIRECT CHAIN or createDetector() throws
+       "Failed to fetch" and the app cannot start.
+
+       The chain is not a single host. MoveNet's default URL is on tfhub.dev,
+       which Google now redirects following the migration of TFHub models to
+       Kaggle Models; the weights are ultimately served from Google Cloud Storage.
+       CSP is enforced at EVERY hop, so a host missing anywhere in the chain
+       blocks the load. All known hosts are listed below.
+
+       IF THE APP STILL FAILS with "Could not download the MoveNet model":
+         1. Open DevTools (F12) -> Console.
+         2. Find the line: "Refused to connect to '<URL>' because it violates
+            the following Content Security Policy directive: connect-src ...".
+         3. Add that URL's ORIGIN (scheme + host, e.g. https://example.com) to
+            connect-src below. Record the change in the dissertation.
+         4. If you need to test immediately, comment out this whole meta tag.
+            The CSP is only required for the privacy verification tests (T7/T8);
+            RQ1/RQ2/RQ3 capture is unaffected by it.
+
+     TIER 2 — BUNDLED MODE (target for evaluation capture and the viva).
+       Bundle the libraries AND the model weights locally (see README), then
+       replace the connect-src line with exactly:
+              connect-src 'self';
+       That is true enforced zero-egress: no third-party host is trusted at all,
+       and the redirect-chain fragility above disappears entirely. Use this tier
+       for any session whose data appears in the dissertation.
+
+     NOTE on 'unsafe-inline' for style-src: this page uses a <style> block and a
+     few inline style attributes. Style injection is not the threat model here
+     (egress is), and connect-src is unaffected by it. Removing it would require
+     extracting the CSS to a separate file — a cosmetic change, not a security one.
+
+     IF THE APP FAILS TO START after enabling this policy, open DevTools > Console
+     and read the CSP violation. The most likely cause is the TF.js backend needing
+     'wasm-unsafe-eval' in script-src on some browsers; add it only if a violation
+     explicitly names it, and record the change in the dissertation.
+     ============================================================================ -->
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'self';
+               script-src 'self' https://cdn.jsdelivr.net;
+               style-src 'self' 'unsafe-inline';
+               img-src 'self' blob: data:;
+               media-src 'self' blob:;
+               connect-src 'self'
+                           https://cdn.jsdelivr.net
+                           https://storage.googleapis.com
+                           https://tfhub.dev
+                           https://www.kaggle.com
+                           https://kaggle.com
+                           https://www.gstatic.com;
+               worker-src 'self' blob:;
+               object-src 'none';
+               base-uri 'self';
+               form-action 'none';">
+
+<style>
+  :root {
+    --bg: #0b1220;
+    --panel: #111a2e;
+    --panel-2: #16223d;
+    --accent: #4ade80;
+    --warn: #facc15;
+    --danger: #f87171;
+    --text: #e6edf7;
+    --muted: #8aa0c2;
+    --border: #1f2c4a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  header { padding: 16px 24px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; background: var(--panel); }
+  header h1 { margin: 0; font-size: 18px; letter-spacing: 0.5px; }
+  header h1 .tag { color: var(--accent); font-weight: 600; }
+  header .sub { font-size: 12px; color: var(--muted); }
+  .container { display: grid; grid-template-columns: 1fr 380px; gap: 16px; padding: 16px; max-width: 1400px; margin: 0 auto; }
+  @media (max-width: 900px) { .container { grid-template-columns: 1fr; } }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+  .card h2 { margin: 0 0 12px 0; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); }
+  .video-wrap { position: relative; width: 100%; aspect-ratio: 4/3; background: #000; border-radius: 8px; overflow: hidden; }
+  video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+  video { transform: scaleX(-1); object-fit: cover; }
+  canvas { transform: scaleX(-1); }
+  .status-bar { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  .pill { padding: 6px 12px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; font-size: 12px; }
+  .pill.good { border-color: var(--accent); color: var(--accent); }
+  .pill.warn { border-color: var(--warn); color: var(--warn); }
+  .pill.bad { border-color: var(--danger); color: var(--danger); }
+  .controls { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  button { background: var(--accent); color: #062012; border: none; padding: 10px 16px; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 13px; }
+  button.secondary { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .metric { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+  .metric:last-child { border-bottom: none; }
+  .metric .v { font-variant-numeric: tabular-nums; color: var(--accent); font-weight: 600; }
+  .metric .v.warn { color: var(--warn); }
+  .metric .v.bad { color: var(--danger); }
+  .alert-feed { max-height: 240px; overflow-y: auto; font-size: 12px; }
+  .alert { padding: 8px 10px; border-radius: 6px; margin-bottom: 6px; background: var(--panel-2); border-left: 3px solid var(--accent); }
+  .alert.warn { border-left-color: var(--warn); }
+  .alert.bad { border-left-color: var(--danger); }
+  .alert .t { color: var(--muted); font-size: 10px; }
+  .score-display { text-align: center; padding: 16px 0; }
+  .score-display .num { font-size: 48px; font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .score-display .num.warn { color: var(--warn); }
+  .score-display .num.bad { color: var(--danger); }
+  .score-display .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+  .legend { font-size: 11px; color: var(--muted); line-height: 1.6; margin-top: 8px; }
+  .legend strong { color: var(--text); }
+  #loading { position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 40px; color: var(--muted); z-index: 2; }
+  .micro-break-modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.85); z-index: 100; justify-content: center; align-items: center; }
+  .micro-break-modal.show { display: flex; }
+  .micro-break-box { background: var(--panel); padding: 32px; border-radius: 12px; max-width: 480px; text-align: center; border: 1px solid var(--accent); }
+  .micro-break-box h3 { color: var(--accent); margin: 0 0 12px 0; }
+  .privacy-note { font-size: 11px; color: var(--muted); padding: 10px; background: var(--panel-2); border-radius: 6px; margin-top: 12px; line-height: 1.5; }
+
+  /* ---- v0.4.9: Posture Avatar (UI layer only — see app.js changelog) ---- */
+  .avatar-wrap { position: relative; width: 100%; aspect-ratio: 4/5; background: #0b1220; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); transition: opacity 0.2s ease; }
+  .avatar-wrap canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+  .avatar-wrap.no-pose { opacity: 0.45; }
+  .avatar-caption { font-size: 11px; color: var(--muted); line-height: 1.5; margin-top: 8px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Erg<span class="tag">o</span>Sentinel</h1>
+    <!-- BUG-01 fixed: version aligned with app.js export (0.4.8-production) -->
+    <div class="sub">On-device workplace ergonomic monitoring · v0.4.8</div>
+  </div>
+  <div class="sub" id="session-info">Session: not started</div>
+</header>
+
+<div class="container">
+
+  <div>
+    <div class="card">
+      <h2>Live Posture Analysis</h2>
+      <div class="video-wrap">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="overlay"></canvas>
+        <div id="loading">Click "Start Session" to begin. Camera frames stay on your device.</div>
+      </div>
+      <div class="status-bar" id="status-bar">
+        <span class="pill" id="pill-fps">FPS: —</span>
+        <span class="pill" id="pill-conf">Detection: —</span>
+        <span class="pill" id="pill-neck">Head tilt: —</span>
+        <span class="pill" id="pill-shoulder">Shoulders: —</span>
+        <span class="pill" id="pill-trunk">Trunk: —</span>
+      </div>
+      <div class="controls">
+        <button id="btn-start">Start Session</button>
+        <button id="btn-stop" class="secondary" disabled>Stop Session</button>
+        <button id="btn-calibrate" class="secondary" disabled>Reset Score</button>
+        <button id="btn-export" class="secondary" disabled>Export Session Report</button>
+      </div>
+      <div class="privacy-note">
+        <strong>Privacy:</strong> All pose inference runs locally in your browser via TensorFlow.js + MoveNet. No video or images leave this device — this is enforced by a Content-Security-Policy that instructs the browser to refuse outbound connections, not merely by the absence of upload code. Only anonymised numeric posture scores are held, in memory, for this session, and they are written to disk only when you click Export.
+      </div>
+    </div>
+  </div>
+
+  <div>
+    <div class="card">
+      <h2>Ergonomic Risk Score</h2>
+      <div class="score-display">
+        <div class="num" id="score-num">—</div>
+        <!-- Fix-2: renamed from "Cumulative Strain Index" to reflect the EMA's true role -->
+        <div class="label">Smoothed Strain Signal (0–100)</div>
+      </div>
+      <div class="metric"><span>Lateral head tilt</span><span class="v" id="m-neck">—</span></div>
+      <div class="metric"><span>Shoulder asymmetry</span><span class="v" id="m-shoulder">—</span></div>
+      <div class="metric"><span>Trunk lean</span><span class="v" id="m-trunk">—</span></div>
+      <div class="metric"><span>Time in poor posture</span><span class="v" id="m-poor-time">0s</span></div>
+      <div class="metric"><span>Continuous sitting</span><span class="v" id="m-sit-time">0s</span></div>
+      <div class="metric"><span>Micro-breaks taken</span><span class="v" id="m-breaks">0</span></div>
+    </div>
+
+    <div class="card" style="margin-top: 16px;">
+      <h2>Posture Avatar</h2>
+      <div class="avatar-wrap no-pose" id="avatar-wrap">
+        <canvas id="avatar-canvas" width="400" height="500"></canvas>
+      </div>
+      <div class="avatar-caption">
+        A stylised, illustrative mirror of the same coronal-plane readings shown above
+        (head tilt, shoulder tilt, trunk lean) — it introduces no new measurement and is
+        not part of the exported session data. It dims when no valid pose is detected.
+        Character art: <a href="https://kenney.nl" target="_blank" rel="noopener" style="color:var(--muted);">Kenney.nl</a> (CC0).
+      </div>
+    </div>
+
+    <div class="card" style="margin-top: 16px;">
+      <h2>Alert Stream</h2>
+      <div class="alert-feed" id="alerts">
+        <div class="alert">Awaiting session start…</div>
+      </div>
+      <div class="legend">
+        <strong>Detection logic (coronal plane only):</strong> Lateral head tilt is reported as an angle from vertical and flagged above 15°, with a severe band above 30°; the reading is capped at 45°, the approximate limit of cervical lateral flexion. Shoulder asymmetry is the vertical difference between the shoulders normalised by shoulder width, with a threshold calibrated from still-neutral self-data. Trunk lean fires when the shoulder-to-hip line deviates more than 12° from vertical, and reports <em>N/A</em> when the hips are not visible — which is most of the time at a desk. A capture-geometry gate rejects frames when the user is out of range or the camera is tilted, and every rejection is recorded with its reason. A micro-break is suggested after 25 minutes of continuous <em>detected</em> sitting (presence-gated). <strong>Scope:</strong> a front-on monocular camera cannot observe sagittal-axis motion, so forward head posture, lumbar lordosis and true scapular protraction are out of scope — only coronal-plane lateral tilt and shoulder asymmetry are measured.
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="micro-break-modal" id="modal">
+  <div class="micro-break-box">
+    <h3>Time for a Micro-Break</h3>
+    <p>You've been sitting for 25 minutes. A 60-second movement break reduces musculoskeletal strain and resets postural awareness.</p>
+    <p style="color: var(--muted); font-size: 13px;">Stand up · Roll shoulders backward 5× · Look at a point 6 metres away for 20 seconds · Gentle neck rotations</p>
+    <button id="btn-break-done">I've taken the break</button>
+  </div>
+</div>
+
+<!-- ============================================================================
+     TensorFlow.js + MoveNet (CDN).
+
+     SUBRESOURCE INTEGRITY (Fix-1, OPERATOR STEP — DO THIS ON YOUR OWN MACHINE)
+     -------------------------------------------------------------------------
+     SRI hashes are deliberately NOT pre-filled: a wrong hash makes the browser
+     refuse the script and the app will not start. Generate the real digests where
+     the CDN is reachable, then paste each into the matching integrity="" slot:
+
+       for u in \
+         https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@4.17.0/dist/tf-core.min.js \
+         https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter@4.17.0/dist/tf-converter.min.js \
+         https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.17.0/dist/tf-backend-webgl.min.js \
+         https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3/dist/pose-detection.min.js ; do
+         echo "$u"; curl -s "$u" | openssl dgst -sha384 -binary | openssl base64 -A; echo; echo
+       done
+
+     Then add to each tag:  integrity="sha384-<DIGEST>" crossorigin="anonymous"
+
+     The browser will refuse to execute any script whose bytes do not match the
+     pinned digest, so supply-chain tampering fails closed. CSP (above) already
+     blocks exfiltration even without SRI; SRI additionally blocks code substitution.
+     ============================================================================ -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@4.17.0/dist/tf-core.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter@4.17.0/dist/tf-converter.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.17.0/dist/tf-backend-webgl.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3/dist/pose-detection.min.js"></script>
+
+<script src="app.js"></script>
+</body>
+</html>
